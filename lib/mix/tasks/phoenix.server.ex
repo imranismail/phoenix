@@ -24,10 +24,10 @@ defmodule Mix.Tasks.Phoenix.Server do
   end
 
   defp run_args do
-    if iex_running?, do: [], else: ["--no-halt"]
+    if iex_running?(), do: [], else: ["--no-halt"]
   end
 
   defp iex_running? do
-    Code.ensure_loaded?(IEx) && IEx.started?
+    Code.ensure_loaded?(IEx) and IEx.started?
   end
 end

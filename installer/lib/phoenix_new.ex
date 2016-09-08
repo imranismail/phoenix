@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Phoenix.New do
 
   @phoenix Path.expand("../..", __DIR__)
   @version Mix.Project.config[:version]
-  @shortdoc "Create a new Phoenix v#{@version} application"
+  @shortdoc "Creates a new Phoenix v#{@version} application"
 
   # File mappings
 
@@ -50,6 +50,7 @@ defmodule Mix.Tasks.Phoenix.New do
     {:eex,  "static/brunch/brunch-config.js", "brunch-config.js"},
     {:eex,  "static/brunch/package.json",     "package.json"},
     {:text, "static/app.css",                 "web/static/css/app.css"},
+    {:text, "static/phoenix.css",             "web/static/css/phoenix.css"},
     {:eex,  "static/brunch/app.js",           "web/static/js/app.js"},
     {:eex,  "static/brunch/socket.js",        "web/static/js/socket.js"},
     {:text, "static/robots.txt",              "web/static/assets/robots.txt"},
@@ -66,17 +67,22 @@ defmodule Mix.Tasks.Phoenix.New do
     {:eex,  "new/web/views/page_view.ex",                    "web/views/page_view.ex"},
   ]
 
+  @static [
+    {:text,   "static/bare/.gitignore", ".gitignore"},
+    {:text,   "static/app.css",         "priv/static/css/app.css"},
+    {:append, "static/phoenix.css",     "priv/static/css/app.css"},
+    {:text,   "static/bare/app.js",     "priv/static/js/app.js"},
+    {:text,   "static/robots.txt",      "priv/static/robots.txt"},
+  ]
+
   @bare [
-    {:text, "static/bare/.gitignore", ".gitignore"},
-    {:text, "static/app.css",         "priv/static/css/app.css"},
-    {:text, "static/bare/app.js",     "priv/static/js/app.js"},
-    {:text, "static/robots.txt",      "priv/static/robots.txt"},
+    {:text,   "static/bare/.gitignore", ".gitignore"},
   ]
 
   # Embed all defined templates
   root = Path.expand("../templates", __DIR__)
 
-  for {format, source, _} <- @new ++ @ecto ++ @brunch ++ @html ++ @bare do
+  for {format, source, _} <- @new ++ @ecto ++ @brunch ++ @html ++ @static ++ @bare do
     unless format == :keep do
       @external_resource Path.join(root, source)
       def render(unquote(source)), do: unquote(File.read!(Path.join(root, source)))
@@ -95,7 +101,7 @@ defmodule Mix.Tasks.Phoenix.New do
 
       mix phoenix.new PATH [--module MODULE] [--app APP]
 
-  A project at the given PATH  will be created. The
+  A project at the given PATH will be created. The
   application name and module name will be retrieved
   from the path, unless `--module` or `--app` is given.
 
@@ -107,8 +113,8 @@ defmodule Mix.Tasks.Phoenix.New do
       the generated skeleton
 
     * `--database` - specify the database adapter for ecto.
-      Values can be `postgres` `mysql`, `mssql`, `sqlite` or
-      `mongodb`. Defaults to `postgres`
+      Values can be `postgres`, `mysql`, `mssql`, or `mongodb`.
+      Defaults to `postgres`.
 
     * `--no-brunch` - do not generate brunch files
       for static asset building. When choosing this
@@ -145,7 +151,18 @@ defmodule Mix.Tasks.Phoenix.New do
   end
 
   def run(argv) do
-    {opts, argv, _} = OptionParser.parse(argv, switches: @switches)
+    unless Version.match? System.version, "~> 1.2" do
+      Mix.raise "Phoenix v#{@version} requires at least Elixir v1.2.\n " <>
+                "You have #{System.version}. Please update accordingly"
+    end
+
+    {opts, argv} =
+      case OptionParser.parse(argv, strict: @switches) do
+        {opts, argv, []} ->
+          {opts, argv}
+        {_opts, _argv, [switch | _]} ->
+          Mix.raise "Invalid option: " <> switch_to_string(switch)
+      end
 
     case argv do
       [] ->
@@ -153,7 +170,8 @@ defmodule Mix.Tasks.Phoenix.New do
       [path|_] ->
         app = opts[:app] || Path.basename(Path.expand(path))
         check_application_name!(app, !!opts[:app])
-        mod = opts[:module] || Mix.Utils.camelize(app)
+        check_directory_existence!(app)
+        mod = opts[:module] || Macro.camelize(app)
         check_module_name_validity!(mod)
         check_module_name_availability!(mod)
 
@@ -177,8 +195,23 @@ defmodule Mix.Tasks.Phoenix.New do
     in_umbrella? = in_umbrella?(path)
     brunch_deps_prefix = if in_umbrella?, do: "../../", else: ""
 
-    binary_id = Keyword.get(opts, :binary_id, false)
-    adapter_config = Keyword.put_new(adapter_config, :binary_id, binary_id)
+    adapter_config =
+      case Keyword.fetch(opts, :binary_id) do
+        {:ok, value} -> Keyword.put_new(adapter_config, :binary_id, value)
+        :error -> adapter_config
+      end
+
+
+    generator_config =
+      case get_generator_config(adapter_config) do
+        []               -> nil
+        generator_config ->
+          """
+
+          # Configure phoenix generators
+          config :phoenix, :generators#{kw_to_config(generator_config)}
+          """
+      end
 
     binding = [application_name: app,
                application_module: mod,
@@ -198,7 +231,8 @@ defmodule Mix.Tasks.Phoenix.New do
                adapter_module: adapter_module,
                adapter_config: adapter_config,
                hex?: Code.ensure_loaded?(Hex),
-               namespaced?: Mix.Utils.camelize(app) != mod]
+               generator_config: generator_config,
+               namespaced?: Macro.camelize(app) != mod]
 
     copy_from path, binding, @new
 
@@ -226,6 +260,9 @@ defmodule Mix.Tasks.Phoenix.New do
       end
     end)
   end
+
+  defp switch_to_string({name, nil}), do: name
+  defp switch_to_string({name, val}), do: name <> "=" <> val
 
   defp copy_model(_app, path, binding) do
     if binding[:ecto] do
@@ -255,27 +292,28 @@ defmodule Mix.Tasks.Phoenix.New do
         adapter: #{inspect binding[:adapter_module]}#{kw_to_config adapter_config[:prod]},
         pool_size: 20
       """
-
-      append_to path, "config/config.exs", """
-
-      # Configure phoenix generators
-      config :phoenix, :generators,
-        migration: #{adapter_config[:migration]},
-        binary_id: #{adapter_config[:binary_id]}
-      """
     end
   end
 
+  defp get_generator_config(adapter_config) do
+    adapter_config
+    |> Keyword.take([:binary_id, :migration, :sample_binary_id])
+    |> Enum.filter(fn {_, value} -> not is_nil(value) end)
+  end
+
   defp copy_static(_app, path, binding) do
-    if binding[:brunch] == false do
-      copy_from path, binding, @bare
-      create_file Path.join(path, "priv/static/js/phoenix.js"), phoenix_js_text()
-      create_file Path.join(path, "priv/static/images/phoenix.png"), phoenix_png_text()
-      create_file Path.join(path, "priv/static/favicon.ico"), phoenix_favicon_text()
-    else
+    case {binding[:brunch], binding[:html]} do
+    {true, _} ->
       copy_from path, binding, @brunch
       create_file Path.join(path, "web/static/assets/images/phoenix.png"), phoenix_png_text()
       create_file Path.join(path, "web/static/assets/favicon.ico"), phoenix_favicon_text()
+    {false, true} ->
+      copy_from path, binding, @static
+      create_file Path.join(path, "priv/static/js/phoenix.js"), phoenix_js_text()
+      create_file Path.join(path, "priv/static/images/phoenix.png"), phoenix_png_text()
+      create_file Path.join(path, "priv/static/favicon.ico"), phoenix_favicon_text()
+    {false, false} ->
+      copy_from path, binding, @bare
     end
   end
 
@@ -351,13 +389,14 @@ defmodule Mix.Tasks.Phoenix.New do
 
   defp cmd(cmd) do
     Mix.shell.info [:green, "* running ", :reset, cmd]
-
-      # We use :os.cmd/1 because there is a bug in OTP
-      # where we cannot execute .cmd files on Windows.
-      # We could use Mix.shell.cmd/1 but that automatically
-      # outputs to the terminal and we don't want that.
-      :os.cmd(String.to_char_list(cmd))
-
+    case Mix.shell.cmd(cmd, [quiet: true]) do
+      0 ->
+        true
+      _ ->
+        Mix.shell.error [:red, "* error ", :reset, "command failed to execute, " <>
+          "please run the following command again after installation: \"#{cmd}\""]
+        false
+    end
   end
 
   defp check_application_name!(name, from_app_flag) do
@@ -388,6 +427,12 @@ defmodule Mix.Tasks.Phoenix.New do
     end
   end
 
+  def check_directory_existence!(name) do
+    if File.dir?(name) && !Mix.shell.yes?("The directory #{name} already exists. Are you sure you want to continue?") do
+      Mix.raise "Please select another directory for installation."
+    end
+  end
+
   defp get_ecto_adapter("mssql", app, module) do
     {:tds_ecto, Tds.Ecto, db_config(app, module, "db_user", "db_password")}
   end
@@ -397,24 +442,17 @@ defmodule Mix.Tasks.Phoenix.New do
   defp get_ecto_adapter("postgres", app, module) do
     {:postgrex, Ecto.Adapters.Postgres, db_config(app, module, "postgres", "postgres")}
   end
-  defp get_ecto_adapter("sqlite", app, module) do
-    {:sqlite_ecto, Sqlite.Ecto,
-      dev:  [database: "db/#{app}_dev.sqlite"],
-      test: [database: "db/#{app}_test.sqlite", pool: Ecto.Adapters.SQL.Sandbox],
-      prod: [database: "db/#{app}_prod.sqlite"],
-      test_begin: "Ecto.Adapters.SQL.begin_test_transaction(#{module}.Repo)",
-      test_restart: "Ecto.Adapters.SQL.restart_test_transaction(#{module}.Repo, [])",
-      migration: true}
-  end
   defp get_ecto_adapter("mongodb", app, module) do
     {:mongodb_ecto, Mongo.Ecto,
      dev:  [database: "#{app}_dev"],
      test: [database: "#{app}_test", pool_size: 1],
      prod: [database: "#{app}_prod"],
-     test_begin: "",
-     test_restart: "Mongo.Ecto.truncate(#{module}.Repo, [])",
+     test_setup_all: "",
+     test_setup: "",
+     test_async: "Mongo.Ecto.truncate(#{module}.Repo, [])",
      binary_id: true,
-     migration: false}
+     migration: false,
+     sample_binary_id: "111111111111111111111111"}
   end
   defp get_ecto_adapter(db, _app, _mod) do
     Mix.raise "Unknown database #{inspect db}"
@@ -425,9 +463,9 @@ defmodule Mix.Tasks.Phoenix.New do
      test: [username: user, password: pass, database: "#{app}_test", hostname: "localhost",
             pool: Ecto.Adapters.SQL.Sandbox],
      prod: [username: user, password: pass, database: "#{app}_prod"],
-     test_begin: "Ecto.Adapters.SQL.begin_test_transaction(#{module}.Repo)",
-     test_restart: "Ecto.Adapters.SQL.restart_test_transaction(#{module}.Repo, [])",
-     migration: true]
+     test_setup_all: "Ecto.Adapters.SQL.Sandbox.mode(#{module}.Repo, :manual)",
+     test_setup: ":ok = Ecto.Adapters.SQL.Sandbox.checkout(#{module}.Repo)",
+     test_async: "Ecto.Adapters.SQL.Sandbox.mode(#{module}.Repo, {:shared, self()})"]
   end
 
   defp kw_to_config(kw) do
@@ -460,8 +498,8 @@ defmodule Mix.Tasks.Phoenix.New do
     :crypto.strong_rand_bytes(length) |> Base.encode64 |> binary_part(0, length)
   end
 
-  # defp phoenix_dep("deps/phoenix"), do: ~s[{:phoenix, "~> 1.1.2"}]
-  defp phoenix_dep("deps/phoenix"), do: ~s[{:phoenix, github: "phoenixframework/phoenix", override: true}]
+  defp phoenix_dep("deps/phoenix"), do: ~s[{:phoenix, "~> 1.2.0"}]
+  # defp phoenix_dep("deps/phoenix"), do: ~s[{:phoenix, github: "phoenixframework/phoenix", override: true}]
   defp phoenix_dep(path), do: ~s[{:phoenix, path: #{inspect path}, override: true}]
 
   defp phoenix_static_path("deps/phoenix"), do: "deps/phoenix"
@@ -472,7 +510,7 @@ defmodule Mix.Tasks.Phoenix.New do
     relative = Path.relative_to(absolute, @phoenix)
 
     if absolute == relative do
-      Mix.raise "--dev project must be inside Phoenix directory"
+      Mix.raise "--dev projects must be generated inside Phoenix directory"
     end
 
     relative
@@ -498,6 +536,8 @@ defmodule Mix.Tasks.Phoenix.New do
           File.mkdir_p!(target)
         :text ->
           create_file(target, render(source))
+        :append ->
+          append_to(Path.dirname(target), Path.basename(target), render(source))
         :eex  ->
           contents = EEx.eval_string(render(source), binding, file: source)
           create_file(target, contents)

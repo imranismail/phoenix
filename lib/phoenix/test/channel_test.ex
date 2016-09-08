@@ -18,18 +18,18 @@ defmodule Phoenix.ChannelTest do
 
       {:ok, _, socket} =
         socket("user:id", %{some_assigns: 1})
-        |> subscribe_and_join(RoomChannel, "rooms:lobby", %{"id" => 3})
+        |> subscribe_and_join(RoomChannel, "room:lobby", %{"id" => 3})
 
   You usually want to set the same ID and assigns your
   `UserSocket.connect/2` callback would set. Alternatively,
-  you can use the `connect/3` helper to call your `UserSocket.connect/2`
+  you can use the `connect/2` helper to call your `UserSocket.connect/2`
   callback and initialize the socket with the socket id:
 
       {:ok, socket} = connect(UserSocket, %{"some" => "params"})
-      {:ok, _, socket} = subscribe_and_join(socket, "rooms:lobby", %{"id" => 3})
+      {:ok, _, socket} = subscribe_and_join(socket, "room:lobby", %{"id" => 3})
 
   Once called, `subscribe_and_join/4` will subscribe the
-  current test process to the "rooms:lobby" topic and start a
+  current test process to the "room:lobby" topic and start a
   channel in another process. It returns `{:ok, reply, socket}`
   or `{:error, reply}`.
 
@@ -241,7 +241,7 @@ defmodule Phoenix.ChannelTest do
     if endpoint = Module.get_attribute(__CALLER__.module, :endpoint) do
       quote do
         Transport.connect(unquote(endpoint), unquote(handler), :channel_test,
-                          unquote(__MODULE__), NoopSerializer, unquote(params))
+                          unquote(__MODULE__), NoopSerializer, Phoenix.ChannelTest.__stringify__(unquote(params)))
       end
     else
       raise "module attribute @endpoint not set for socket/2"
@@ -259,7 +259,7 @@ defmodule Phoenix.ChannelTest do
     subscribe_and_join!(socket, channel, topic, payload)
   end
   @doc """
-  Same as `subscribe_and_join/4` but returns either the socket
+  Same as `subscribe_and_join/4`, but returns either the socket
   or throws an error.
 
   This is helpful when you are not testing joining the channel
@@ -301,7 +301,7 @@ defmodule Phoenix.ChannelTest do
   """
   def subscribe_and_join(%Socket{} = socket, channel, topic, payload \\ %{})
       when is_atom(channel) and is_binary(topic) and is_map(payload) do
-    socket.endpoint.subscribe(self(), topic)
+    socket.endpoint.subscribe(topic)
     join(socket, channel, topic, payload)
   end
 
@@ -343,19 +343,21 @@ defmodule Phoenix.ChannelTest do
   ## Examples
 
       iex> push socket, "new_message", %{id: 1, content: "hello"}
-      :ok
+      reference
 
   """
+  @spec push(Socket.t, String.t, map()) :: reference()
   def push(socket, event, payload \\ %{}) do
     ref = make_ref()
     send(socket.channel_pid,
-         %Message{event: event, topic: socket.topic, ref: ref, payload: payload})
+         %Message{event: event, topic: socket.topic, ref: ref, payload: __stringify__(payload)})
     ref
   end
 
   @doc """
   Emulates the client leaving the channel.
   """
+  @spec leave(Socket.t) :: reference()
   def leave(socket) do
     push(socket, "phx_leave", %{})
   end
@@ -388,7 +390,7 @@ defmodule Phoenix.ChannelTest do
   end
 
   @doc """
-  Same as `broadcast_from/3` but raises if broadcast fails.
+  Same as `broadcast_from/3`, but raises if broadcast fails.
   """
   def broadcast_from!(socket, event, message) do
     %{pubsub_server: pubsub_server, topic: topic, transport_pid: transport_pid} = socket
@@ -407,6 +409,23 @@ defmodule Phoenix.ChannelTest do
   the data being sent, as long as something was sent.
 
   The timeout is in milliseconds and defaults to 100ms.
+
+  **NOTE:** Because event and payload are patterns, they will be matched.  This
+  means that if you wish to assert that the received payload is equivalent to
+  an existing variable, you need to pin the variable in the assertion
+  expression.
+
+  Good:
+
+      expected_payload = %{foo: "bar"}
+      assert_push "some_event", ^expected_payload
+
+  Bad:
+
+      expected_payload = %{foo: "bar"}
+      assert_push "some_event", expected_payload
+      # The code above does not assert the payload matches the described map.
+
   """
   defmacro assert_push(event, payload, timeout \\ 100) do
     quote do
@@ -486,7 +505,7 @@ defmodule Phoenix.ChannelTest do
   Before asserting anything was broadcast, we must first
   subscribe to the topic of the channel in the test process:
 
-      @endpoint.subscribe(self(), "foo:ok")
+      @endpoint.subscribe("foo:ok")
 
   Now we can match on event and payload as patterns:
 
@@ -537,4 +556,13 @@ defmodule Phoenix.ChannelTest do
       _ -> raise "no channel found for topic #{inspect topic} in #{inspect socket.handler}"
     end
   end
+
+  @doc false
+  def __stringify__(%{} = params),
+    do: Enum.into(params, %{}, &stringify_kv/1)
+  def __stringify__(other),
+    do: other
+
+  defp stringify_kv({k, v}),
+    do: {to_string(k), __stringify__(v)}
 end

@@ -18,7 +18,7 @@ defmodule Phoenix.Router.Helpers do
   end
 
   def url(_router, %URI{} = uri) do
-    uri_to_string(uri)
+    URI.to_string(%URI{uri | path: nil})
   end
 
   def url(_router, endpoint) when is_atom(endpoint) do
@@ -48,32 +48,6 @@ defmodule Phoenix.Router.Helpers do
   end
 
   ## Helpers
-
-  defp uri_to_string(uri) do
-    scheme = uri.scheme
-
-    if scheme && (port = URI.default_port(scheme)) do
-      if uri.port == port, do: uri = %{uri | port: nil}
-    end
-
-    authority = extract_authority(uri)
-
-    result = ""
-    if uri.scheme, do: result = result <> uri.scheme <> ":"
-    if authority,  do: result = result <> "//" <> authority
-    result
-  end
-
-  defp extract_authority(%{host: nil, authority: authority}) do
-    authority
-  end
-
-  defp extract_authority(%{host: host, userinfo: userinfo, port: port}) do
-    authority = host
-    if userinfo, do: authority = userinfo <> "@" <> authority
-    if port, do: authority = authority <> ":" <> Integer.to_string(port)
-    authority
-  end
 
   defp build_own_forward_path(conn, router, path) do
     case Map.fetch(conn.private, router) do
@@ -206,6 +180,12 @@ defmodule Phoenix.Router.Helpers do
                   line: env.line, file: env.file)
   end
 
+  @anno (if :erlang.system_info(:otp_release) >= '19' do
+    [generated: true]
+  else
+    [line: -1]
+  end)
+
   @doc """
   Receives a route and returns the quoted definition for its helper function.
 
@@ -220,8 +200,8 @@ defmodule Phoenix.Router.Helpers do
     {bins, vars} = :lists.unzip(exprs.binding)
     segs = expand_segments(exprs.path)
 
-    # We are using -1 to avoid warnings in case a path has already been defined.
-    quote line: -1 do
+    # We are using @anno to avoid warnings in case a path has already been defined.
+    quote @anno do
       def unquote(:"#{helper}_path")(conn_or_endpoint, unquote(opts), unquote_splicing(vars)) do
         unquote(:"#{helper}_path")(conn_or_endpoint, unquote(opts), unquote_splicing(vars), [])
       end
@@ -250,8 +230,8 @@ defmodule Phoenix.Router.Helpers do
     for {_, binds} <- route_vars, vars = Enum.map(binds, fn (_) -> {:_, [], nil} end) do
       arity = Enum.count(vars) + 2
 
-      # We are using -1 to avoid warnings in case a path has already been defined.
-      quote line: -1 do
+      # We are using @anno to avoid warnings in case a path has already been defined.
+      quote @anno do
         def unquote(:"#{helper}_path")(_conn_or_endpoint, action, unquote_splicing(vars)) do
           Phoenix.Router.Helpers.raise_route_error(__MODULE__, "#{unquote(helper)}_path", unquote(arity), action, unquote(valid_routes))
         end
@@ -289,20 +269,23 @@ defmodule Phoenix.Router.Helpers do
     raise ArgumentError, message: String.strip(message)
   end
 
+  @doc false
+  def encode_param(str), do: URI.encode(str, &URI.char_unreserved?/1)
+
   defp expand_segments([]), do: "/"
   defp expand_segments(segments) when is_list(segments),
     do: expand_segments(segments, "")
   defp expand_segments(segments) do
-    quote(do: "/" <> Enum.map_join(unquote(segments), "/", &URI.encode_www_form/1))
+    quote(do: "/" <> Enum.map_join(unquote(segments), "/", &unquote(__MODULE__).encode_param/1))
   end
 
   defp expand_segments([{:|, _, [h, t]}], acc),
-    do: quote(do: unquote(expand_segments([h], acc)) <> "/" <> Enum.map_join(unquote(t), "/", &URI.encode_www_form/1))
+    do: quote(do: unquote(expand_segments([h], acc)) <> "/" <> Enum.map_join(unquote(t), "/", fn(s) -> URI.encode(s, &URI.char_unreserved?/1) end))
 
   defp expand_segments([h|t], acc) when is_binary(h),
     do: expand_segments(t, quote(do: unquote(acc) <> unquote("/" <> h)))
   defp expand_segments([h|t], acc),
-    do: expand_segments(t, quote(do: unquote(acc) <> "/" <> URI.encode_www_form(to_param(unquote(h)))))
+    do: expand_segments(t, quote(do: unquote(acc) <> "/" <> URI.encode(to_param(unquote(h)), &URI.char_unreserved?/1)))
   defp expand_segments([], acc),
     do: acc
 end

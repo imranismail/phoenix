@@ -5,7 +5,6 @@ defmodule Phoenix.CodeReloaderTest do
   Application.put_env(:phoenix, __MODULE__.Endpoint,
     root: File.cwd!,
     code_reloader: true,
-    reloadable_paths: ["web"],
     live_reload: [url: "ws://localhost:4000", patterns: [~r/some\/path/]])
 
   defmodule Endpoint do
@@ -48,6 +47,7 @@ defmodule Phoenix.CodeReloaderTest do
     assert conn.state  == :sent
     assert conn.status == 500
     assert conn.resp_body =~ "oops"
-    assert conn.resp_body =~ "CompilationError at GET /"
+    assert conn.resp_body =~ "CompileError"
+    assert conn.resp_body =~ "Compilation error"
   end
 end

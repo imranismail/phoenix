@@ -37,7 +37,7 @@ defmodule Phoenix.Controller do
 
   Those functions are imported from two modules:
 
-    * `Plug.Conn` - a bunch of low-level functions to work with
+    * `Plug.Conn` - a collection of low-level functions to work with
       the connection
 
     * `Phoenix.Controller` - functions provided by Phoenix
@@ -46,11 +46,11 @@ defmodule Phoenix.Controller do
   ## Rendering and layouts
 
   One of the main features provided by controllers is the ability
-  to do content negotiation and render templates based on
+  to perform content negotiation and render templates based on
   information sent by the client. Read `render/3` to learn more.
 
-  It is also important to not confuse `Phoenix.Controller.render/3`
-  with `Phoenix.View.render/3` in the long term. The former expects
+  It is also important not to confuse `Phoenix.Controller.render/3`
+  with `Phoenix.View.render/3`. The former expects
   a connection and relies on content negotiation while the latter is
   connection-agnostic and typically invoked from your views.
 
@@ -96,7 +96,7 @@ defmodule Phoenix.Controller do
   Phoenix injects an `action/2` plug in your controller which calls the
   function matched from the router. By default, it passes the conn and params.
   In some cases, overriding the `action/2` plug in your controller is a
-  useful way to inject certain argument to your actions that you
+  useful way to inject arguments into your actions that you
   would otherwise need to fetch off the connection repeatedly. For example,
   imagine if you stored a `conn.assigns.current_user` in the connection
   and wanted quick access to the user for every action in your controller:
@@ -122,9 +122,8 @@ defmodule Phoenix.Controller do
       import Plug.Conn
       import Phoenix.Controller
 
-      use Phoenix.Controller.Pipeline
+      use Phoenix.Controller.Pipeline, opts
 
-      plug Phoenix.Controller.Logger, opts
       plug :put_new_layout, {Phoenix.Controller.__layout__(__MODULE__, opts), :app}
       plug :put_new_view, Phoenix.Controller.__view__(__MODULE__)
     end
@@ -192,7 +191,7 @@ defmodule Phoenix.Controller do
   In case a JSON response is returned, it will be converted
   to a JSONP as long as the callback field is present in
   the query string. The callback field itself defaults to
-  "callback" but may be configured with the callback option.
+  "callback", but may be configured with the callback option.
 
   In case there is no callback or the response is not encoded
   in JSON format, it is a no-op.
@@ -309,9 +308,9 @@ defmodule Phoenix.Controller do
     cond do
       to = opts[:to] ->
         case to do
-          "//" <> _ -> raise_invalid_url()
+          "//" <> _ -> raise_invalid_url(to)
           "/" <> _  -> to
-          _         -> raise_invalid_url()
+          _         -> raise_invalid_url(to)
         end
       external = opts[:external] ->
         external
@@ -319,8 +318,9 @@ defmodule Phoenix.Controller do
         raise ArgumentError, "expected :to or :external option in redirect/2"
     end
   end
-  defp raise_invalid_url do
-    raise ArgumentError, "the :to option in redirect expects a path"
+  @spec raise_invalid_url(term()) :: no_return()
+  defp raise_invalid_url(url) do
+    raise ArgumentError, "the :to option in redirect expects a path but was #{inspect url}"
   end
 
   @doc """
@@ -382,32 +382,30 @@ defmodule Phoenix.Controller do
       iex> layout(conn)
       {AppView, "print.html"}
 
-      iex> conn = put_layout :print
+      iex> conn = put_layout conn, :print
       iex> layout(conn)
       {AppView, :print}
 
   Raises `Plug.Conn.AlreadySentError` if the conn was already sent.
   """
-  @spec put_layout(Plug.Conn.t, {atom, binary} | binary | false) :: Plug.Conn.t
+  @spec put_layout(Plug.Conn.t, {atom, binary | atom} | binary | false) :: Plug.Conn.t
   def put_layout(%Plug.Conn{state: state} = conn, layout) do
     if state in @unsent do
-      _put_layout(conn, layout)
+      do_put_layout(conn, layout)
     else
       raise Plug.Conn.AlreadySentError
     end
   end
 
-  def _put_layout(conn, layout)
-
-  def _put_layout(conn, false) do
+  defp do_put_layout(conn, false) do
     put_private(conn, :phoenix_layout, false)
   end
 
-  def _put_layout(conn, {mod, layout}) when is_atom(mod) do
+  defp do_put_layout(conn, {mod, layout}) when is_atom(mod) do
     put_private(conn, :phoenix_layout, {mod, layout})
   end
 
-  def _put_layout(conn, layout) when is_binary(layout) or is_atom(layout) do
+  defp do_put_layout(conn, layout) when is_binary(layout) or is_atom(layout) do
     update_in conn.private, fn private ->
       case Map.get(private, :phoenix_layout, false) do
         {mod, _} -> Map.put(private, :phoenix_layout, {mod, layout})
@@ -475,7 +473,7 @@ defmodule Phoenix.Controller do
 
   See `render/3` for more information.
   """
-  @spec render(Plug.Conn.t, Dict.t | binary | atom) :: Plug.Conn.t
+  @spec render(Plug.Conn.t, Keyword.t | map | binary | atom) :: Plug.Conn.t
   def render(conn, template_or_assigns \\ [])
 
   def render(conn, template) when is_binary(template) or is_atom(template) do
@@ -581,21 +579,21 @@ defmodule Phoenix.Controller do
   to change the layout, similar to how `put_view/2` can be used to change
   the view.
 
-  `layout_formats/2` and `put_layout_formats/2` can be used to configure
+  `layout_formats/1` and `put_layout_formats/2` can be used to configure
   which formats support/require layout rendering (defaults to "html" only).
   """
-  @spec render(Plug.Conn.t, binary | atom, Dict.t) :: Plug.Conn.t
-  @spec render(Plug.Conn.t, module, binary | atom) :: Plug.Conn.t
+  @spec render(Plug.Conn.t, binary | atom, Keyword.t | map) :: Plug.Conn.t
   def render(conn, template, assigns)
-    when is_atom(template) and is_list(assigns) do
+      when is_atom(template) and (is_map(assigns) or is_list(assigns)) do
     format =
       get_format(conn) ||
       raise "cannot render template #{inspect template} because conn.params[\"_format\"] is not set. " <>
-            "Please set `plug :accepts, %w(html json ...)` in your pipeline."
+            "Please set `plug :accepts, ~w(html json ...)` in your pipeline."
     do_render(conn, template_name(template, format), format, assigns)
   end
 
-  def render(conn, template, assigns) when is_binary(template) do
+  def render(conn, template, assigns)
+      when is_binary(template) and (is_map(assigns) or is_list(assigns)) do
     case Path.extname(template) do
       "." <> format ->
         do_render(conn, template, format, assigns)
@@ -606,13 +604,23 @@ defmodule Phoenix.Controller do
   end
 
   def render(conn, view, template)
-    when is_atom(view) and is_binary(template) or is_atom(template) do
+      when is_atom(view) and (is_binary(template) or is_atom(template)) do
     render(conn, view, template, [])
   end
 
-  @spec render(Plug.Conn.t, atom, atom | binary, Dict.t) :: Plug.Conn.t
+  @doc """
+  A shortcut that renders the given template in the given view.
+
+  Equivalent to:
+
+      conn
+      |> put_view(view)
+      |> render(template, assigns)
+
+  """
+  @spec render(Plug.Conn.t, atom, atom | binary, Keyword.t | map) :: Plug.Conn.t
   def render(conn, view, template, assigns)
-    when is_atom(view) and is_binary(template) or is_atom(template) do
+      when is_atom(view) and (is_binary(template) or is_atom(template)) do
     conn
     |> put_view(view)
     |> render(template, assigns)
@@ -620,7 +628,7 @@ defmodule Phoenix.Controller do
 
   defp do_render(conn, template, format, assigns) do
     assigns = to_map(assigns)
-    content_type = Plug.MIME.type(format)
+    content_type = MIME.type(format)
     conn =
       conn
       |> put_private(:phoenix_template, template)
@@ -629,7 +637,7 @@ defmodule Phoenix.Controller do
     view = Map.get(conn.private, :phoenix_view) ||
             raise "a view module was not specified, set one with put_view/2"
 
-    runtime_data = %{template: template, format: format}
+    runtime_data = %{view: view, template: template, format: format}
     data = Phoenix.Endpoint.instrument conn, :phoenix_controller_render, runtime_data, fn ->
       Phoenix.View.render_to_iodata(view, template, Map.put(conn.assigns, :conn, conn))
     end
@@ -659,7 +667,7 @@ defmodule Phoenix.Controller do
     * Checks to see if the `required_key` is present
     * Changes empty parameters of `required_key` (recursively) to nils
 
-  This function is useful to remove empty strings sent
+  This function is useful for removing empty strings sent
   via HTML forms. If you are providing an API, there
   is likely no need to invoke `scrub_params/2`.
 
@@ -726,7 +734,6 @@ defmodule Phoenix.Controller do
 
   defp to_map(assigns) when is_map(assigns), do: assigns
   defp to_map(assigns) when is_list(assigns), do: :maps.from_list(assigns)
-  defp to_map(assigns), do: Dict.merge(%{}, assigns)
 
   defp template_name(name, format) when is_atom(name), do:
     Atom.to_string(name) <> "." <> format
@@ -773,9 +780,18 @@ defmodule Phoenix.Controller do
       * x-xss-protection - set to "1; mode=block" to improve XSS
         protection on both Chrome and IE
 
-  Custom headers may also be given.
+  A custom headers map may also be given to be merged with defaults.
   """
-  def put_secure_browser_headers(conn, _opts \\ []) do
+  def put_secure_browser_headers(conn, headers \\ %{})
+  def put_secure_browser_headers(conn, []) do
+    put_secure_defaults(conn)
+  end
+  def put_secure_browser_headers(conn, headers) when is_map(headers) do
+    conn
+    |> put_secure_defaults()
+    |> merge_resp_headers(headers)
+  end
+  defp put_secure_defaults(conn) do
     merge_resp_headers(conn, [
       {"x-frame-options", "SAMEORIGIN"},
       {"x-xss-protection", "1; mode=block"},
@@ -836,7 +852,7 @@ defmodule Phoenix.Controller do
   The first step is to teach Plug about those new media types in
   your `config/config.exs` file:
 
-      config :plug, :mimes, %{
+      config :mime, :types, %{
         "application/vnd.api+json" => ["json-api"]
       }
 
@@ -848,14 +864,14 @@ defmodule Phoenix.Controller do
 
   After this change, you must recompile plug:
 
-      $ touch deps/plug/mix.exs
-      $ mix deps.compile plug
+      $ mix deps.clean mime --build
+      $ mix deps.get
 
   And now you can use it in accepts too:
 
       plug :accepts, ["html", "json-api"]
   """
-  @spec accepts(Plug.Conn.t, [binary]) :: Plug.Conn.t | no_return
+  @spec accepts(Plug.Conn.t, [binary]) :: Plug.Conn.t | no_return()
   def accepts(conn, [_|_] = accepted) do
     case Map.fetch(conn.params, "_format") do
       {:ok, format} ->
@@ -869,9 +885,9 @@ defmodule Phoenix.Controller do
     if format in accepted do
       put_format(conn, format)
     else
-      Logger.debug "Unknown format #{inspect format} in plug :accepts, " <>
-                   "expected one of #{inspect accepted}"
-      conn |> send_resp(406, "") |> halt()
+      raise Phoenix.NotAcceptableError,
+        message: "unknown format #{inspect format}, expected one of #{inspect accepted}",
+        accepts: accepted
     end
   end
 
@@ -898,7 +914,7 @@ defmodule Phoenix.Controller do
         exts = parse_exts(type <> "/" <> subtype)
         q    = parse_q(args)
 
-        if q === 1.0 && (format = find_format(exts, accepted)) do
+        if format = (q === 1.0 && find_format(exts, accepted)) do
           put_format(conn, format)
         else
           parse_header_accept(conn, t, [{-q, exts}|acc], accepted)
@@ -934,15 +950,16 @@ defmodule Phoenix.Controller do
   end
 
   defp parse_exts("*/*" = type), do: type
-  defp parse_exts(type),         do: Plug.MIME.extensions(type)
+  defp parse_exts(type),         do: MIME.extensions(type)
 
   defp find_format("*/*", accepted), do: Enum.fetch!(accepted, 0)
   defp find_format(exts, accepted),  do: Enum.find(exts, &(&1 in accepted))
 
-  defp refuse(conn, accepted) do
-    Logger.debug "No supported media type in accept header in plug :accepts, " <>
-                 "expected one of #{inspect accepted}"
-    conn |> send_resp(406, "") |> halt()
+  @spec refuse(term(), term()) :: no_return()
+  defp refuse(_conn, accepted) do
+    raise Phoenix.NotAcceptableError,
+      message: "no supported media type in accept header, expected one of #{inspect accepted}",
+      accepts: accepted
   end
 
   @doc """
@@ -998,7 +1015,7 @@ defmodule Phoenix.Controller do
   end
 
   @doc """
-  Returns a message from flash by key
+  Returns a message from flash by key.
 
   ## Examples
 

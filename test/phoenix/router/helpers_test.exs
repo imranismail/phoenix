@@ -17,7 +17,7 @@ defmodule Phoenix.Router.HelpersTest do
 
     assert extract_defhelper(route, 1) == String.strip """
     def(hello_world_path(conn_or_endpoint, :world, bar, params)) do
-      path(conn_or_endpoint, segments(("" <> "/foo") <> "/" <> URI.encode_www_form(to_param(bar)), params, ["bar"]))
+      path(conn_or_endpoint, segments(("" <> "/foo") <> "/" <> URI.encode(to_param(bar), &URI.char_unreserved?/1), params, ["bar"]))
     end
     """
   end
@@ -33,7 +33,7 @@ defmodule Phoenix.Router.HelpersTest do
 
     assert extract_defhelper(route, 1) == String.strip """
     def(hello_world_path(conn_or_endpoint, :world, bar, params)) do
-      path(conn_or_endpoint, segments(("" <> "/foo") <> "/" <> Enum.map_join(bar, "/", &URI.encode_www_form/1), params, ["bar"]))
+      path(conn_or_endpoint, segments(("" <> "/foo") <> "/" <> Enum.map_join(bar, "/", fn s -> URI.encode(s, &URI.char_unreserved?/1) end), params, ["bar"]))
     end
     """
   end
@@ -141,9 +141,12 @@ defmodule Phoenix.Router.HelpersTest do
     assert Helpers.post_path(__MODULE__, :show, 5, []) == "/posts/5"
     assert Helpers.post_path(__MODULE__, :show, 5, id: 5) == "/posts/5"
     assert Helpers.post_path(__MODULE__, :show, 5, %{"id" => 5}) == "/posts/5"
+    assert Helpers.post_path(__MODULE__, :show, "foo") == "/posts/foo"
+    assert Helpers.post_path(__MODULE__, :show, "foo bar") == "/posts/foo%20bar"
 
     assert Helpers.post_path(__MODULE__, :file, ["foo", "bar/baz"]) == "/posts/file/foo/bar%2Fbaz"
     assert Helpers.post_path(__MODULE__, :file, ["foo", "bar"], []) == "/posts/file/foo/bar"
+    assert Helpers.post_path(__MODULE__, :file, ["foo", "bar baz"], []) == "/posts/file/foo/bar%20baz"
 
     assert Helpers.chat_path(__MODULE__, :show, ["chat"]) == "/chat"
     assert Helpers.chat_path(__MODULE__, :show, ["chat", "foo"]) == "/chat/foo"
@@ -153,6 +156,8 @@ defmodule Phoenix.Router.HelpersTest do
     assert Helpers.top_path(__MODULE__, :top) == "/posts/top"
     assert Helpers.top_path(__MODULE__, :top, id: 5) == "/posts/top?id=5"
     assert Helpers.top_path(__MODULE__, :top, %{"id" => 5}) == "/posts/top?id=5"
+    assert Helpers.top_path(__MODULE__, :top, %{"id" => "foo"}) == "/posts/top?id=foo"
+    assert Helpers.top_path(__MODULE__, :top, %{"id" => "foo bar"}) == "/posts/top?id=foo+bar"
 
     error_message = fn helper, arity ->
       """
@@ -405,41 +410,41 @@ defmodule Phoenix.Router.HelpersTest do
 
   test "helpers module generates a static_path helper" do
     assert Helpers.static_path(__MODULE__, "/images/foo.png") == "/images/foo.png"
-    assert Helpers.static_path(conn_with_endpoint, "/images/foo.png") == "/images/foo.png"
-    assert Helpers.static_path(socket_with_endpoint, "/images/foo.png") == "/images/foo.png"
+    assert Helpers.static_path(conn_with_endpoint(), "/images/foo.png") == "/images/foo.png"
+    assert Helpers.static_path(socket_with_endpoint(), "/images/foo.png") == "/images/foo.png"
   end
 
   test "helpers module generates a static_url helper" do
     url = "https://static.example.com/images/foo.png"
     assert Helpers.static_url(__MODULE__, "/images/foo.png") == url
-    assert Helpers.static_url(conn_with_endpoint, "/images/foo.png") == url
-    assert Helpers.static_url(socket_with_endpoint, "/images/foo.png") == url
+    assert Helpers.static_url(conn_with_endpoint(), "/images/foo.png") == url
+    assert Helpers.static_url(socket_with_endpoint(), "/images/foo.png") == url
   end
 
   test "helpers module generates a url helper" do
     assert Helpers.url(__MODULE__) == "https://example.com"
-    assert Helpers.url(conn_with_endpoint) == "https://example.com"
-    assert Helpers.url(socket_with_endpoint) == "https://example.com"
-    assert Helpers.url(uri) == "https://example.com"
+    assert Helpers.url(conn_with_endpoint()) == "https://example.com"
+    assert Helpers.url(socket_with_endpoint()) == "https://example.com"
+    assert Helpers.url(uri()) == "https://example.com"
   end
 
   test "helpers module generates a path helper" do
     assert Helpers.path(__MODULE__, "/") == "/"
-    assert Helpers.path(conn_with_endpoint, "/") == "/"
-    assert Helpers.path(socket_with_endpoint, "/") == "/"
-    assert Helpers.path(uri, "/") == "/"
+    assert Helpers.path(conn_with_endpoint(), "/") == "/"
+    assert Helpers.path(socket_with_endpoint(), "/") == "/"
+    assert Helpers.path(uri(), "/") == "/"
   end
 
   test "helpers module generates named routes url helpers" do
     url = "https://example.com/admin/new/messages/1"
     assert Helpers.admin_message_url(__MODULE__, :show, 1) == url
     assert Helpers.admin_message_url(__MODULE__, :show, 1, []) == url
-    assert Helpers.admin_message_url(conn_with_endpoint, :show, 1) == url
-    assert Helpers.admin_message_url(conn_with_endpoint, :show, 1, []) == url
-    assert Helpers.admin_message_url(socket_with_endpoint, :show, 1) == url
-    assert Helpers.admin_message_url(socket_with_endpoint, :show, 1, []) == url
-    assert Helpers.admin_message_url(uri, :show, 1) == url
-    assert Helpers.admin_message_url(uri, :show, 1, []) == url
+    assert Helpers.admin_message_url(conn_with_endpoint(), :show, 1) == url
+    assert Helpers.admin_message_url(conn_with_endpoint(), :show, 1, []) == url
+    assert Helpers.admin_message_url(socket_with_endpoint(), :show, 1) == url
+    assert Helpers.admin_message_url(socket_with_endpoint(), :show, 1, []) == url
+    assert Helpers.admin_message_url(uri(), :show, 1) == url
+    assert Helpers.admin_message_url(uri(), :show, 1, []) == url
   end
 
   ## Script name
@@ -503,5 +508,10 @@ defmodule Phoenix.Router.HelpersTest do
 
     assert Helpers.static_url(conn_with_script_name(~w(foo)), "/images/foo.png") ==
            "https://static.example.com/api/images/foo.png"
+  end
+
+  test "helpers properly encode named and query string params" do
+    assert Router.Helpers.post_path(__MODULE__, :show, "my path", foo: "my param") ==
+      "/posts/my%20path?foo=my+param"
   end
 end

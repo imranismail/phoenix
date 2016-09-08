@@ -1,8 +1,78 @@
 # Changelog
 
-## 1.1.3-dev
+## 1.2.1 (2016-8-11)
 
-## 1.1.2 (2015-1-8)
+* Enhancements
+  * [Router] Improve errors for invalid route paths
+  * [Plug] Include new development error pages
+
+* Bug Fixes
+  * [Endpoint] Fixed issue where endpoint would fail to code reload on next request after an endpoint compilation error
+
+## 1.2.0 (2016-6-23)
+
+See these [`1.1.x` to `1.2.x` upgrade instructions](https://gist.github.com/chrismccord/29100e16d3990469c47f851e3142f766) to bring your existing apps up to speed.
+
+* Enhancements
+  * [CodeReloader] The `lib/` directory is now code reloaded by default along with `web/` in development
+  * [Channel] Add `subscribe/2` and `unsubscribe/2` to handle external topic subscriptions for a socket
+  * [Channel] Add `:phoenix_channel_join` instrumentation hook
+  * [View] Generate private `render_template/2` clauses for views to allow overriding `render/2` clauses before rendering templates
+  * [View] Add `:path` and `:pattern` options to allow wildcard template inclusion as well as customized template directory locations
+
+* Deprecations
+  * [Endpoint] Generated `subscribe/3` and `unsubscribe/2` clauses have been deprecated in favor of `subscribe/2` and `unsubscribe/1` which uses the caller's pid
+  * [PubSub] `Phoenix.PubSub.subscribe/3` and `Phoenix.PubSub.unsubscribe/2` have been deprecated in favor of `subscribe/2` and `unsubscribe/1` which uses the caller's pid
+  * [Watcher] Using the `:root` endpoint configuration for watchers is deprecated. Pass the :cd option at the end of your watcher argument list in config/dev.exs. For example:
+
+      ```elixir
+      watchers: [node: ["node_modules/brunch/bin/brunch", "watch", "--stdin",
+                 cd: Path.expand("../", __DIR__)]]
+      ```
+
+* Bug Fixes
+  * [Template] Prevent infinite call stack when rendering a non-existent template from `template_not_found`
+
+* Backward incompatible changes
+  * [Channel] `subscribe/1` and `unsubscribe/1` have been removed in favor of calling subscribe and unsubscribe off the endpoint directly
+
+* JavaScript client enhancements
+  * Add Presence object for syncing presence state between client and server
+  * Use return value of channel onMessage callback for specialized message transformations before dispatching to the channel
+
+* JavaScript client backward incompatible changes
+  * `Presence.syncState` and `Presence.syncDiff` now return a copy of the state instead of mutating it
+
+
+## 1.1.6 (2016-6-03)
+
+* Enhancements
+  * Add Erlang 19 compatibility
+
+## 1.1.5 (2016-6-01)
+
+* Enhancements
+  * Fix warnings for Elixir 1.3
+
+## 1.1.4 (2016-1-25)
+
+* Enhancements
+  * [phoenix.new] Update dependencies and solve problem where Mix may take too long to resolve deps
+  * [phoenix.new] Be more conservative regarding brunch dependencies
+  * [phoenix.new] Provide `local.phoenix` task
+  * [phoenix.digest] Add `?vsn=d` to digested assets
+
+## 1.1.3 (2016-1-20)
+
+* Enhancements
+  * [phoenix.gen] Support `--binary-id` option when generating scaffold
+  * [phoenix.new] Don't include Ecto gettext translations if `--no-ecto` is passed
+
+* JavaScript client bug fixes
+  * Ensure exports variable does not leak
+  * Fix `setTimeout` scoping issue for Babel
+
+## 1.1.2 (2016-1-8)
 
 See these *optional* [`1.1.1` to `1.1.2` upgrade instructions](https://gist.github.com/chrismccord/d5bc5f8e38c8f76cad33) to bring your existing apps up to speed.
 
@@ -389,7 +459,7 @@ See these [`0.7.x` to `0.8.0` upgrade instructions](https://gist.github.com/chri
   * [Channels] A channel can be left by returning `{:leave, socket}` from a channel callback to unsubscribe from the channel
   * [Channels] Channel Serializer can now use binary protocol over websockets instead of just text
   * [Endpoint] Allow the reloadable paths to be configured in the endpoint
-  * [Mix] Allow the code generation namespace to be configured with the `:app_namespace` option
+  * [Mix] Allow the code generation namespace to be configured with the `:namespace` option
   * [Mix] Allow `:reloadable_paths` in Endpoint configuration to reload directories other than `"web"` in development
 
 * Bug Fixes

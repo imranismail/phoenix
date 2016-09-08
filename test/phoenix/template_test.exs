@@ -65,13 +65,19 @@ defmodule Phoenix.TemplateTest do
            %{id: 123, name: "eric"}
   end
 
+  test "forces template name to be a string" do
+    assert_raise ArgumentError, "render/2 expects template to be a string, got: 'user.json'", fn ->
+      View.render('user.json', name: "eric")
+    end
+  end
+
   test "render eex templates sanitizes against xss by default" do
     assert View.render("show.html", message: "") ==
-           {:safe, [[[["" | "<div>Show! "] | ""] | "</div>\n"] | "\n"]}
+           {:safe, [[["" | "<div>Show! "] | ""] | "</div>\n"]}
 
     assert View.render("show.html", message: "<script>alert('xss');</script>") ==
-           {:safe, [[[["" | "<div>Show! "] | "&lt;script&gt;alert(&#39;xss&#39;);&lt;/script&gt;"] |
-                   "</div>\n"] | "\n"]}
+           {:safe, [[["" | "<div>Show! "] | "&lt;script&gt;alert(&#39;xss&#39;);&lt;/script&gt;"]
+                    | "</div>\n"]}
   end
 
   test "render eex templates allows raw data to be injected" do
@@ -81,7 +87,7 @@ defmodule Phoenix.TemplateTest do
 
   test "compiles templates from path" do
     assert View.render("show.html", message: "hello!") ==
-           {:safe, [[[["" | "<div>Show! "] | "hello!"] | "</div>\n"] | "\n"]}
+           {:safe, [[["" | "<div>Show! "] | "hello!"] | "</div>\n"]}
   end
 
   test "compiler adds catch-all render/2 that raises UndefinedError" do
@@ -100,6 +106,20 @@ defmodule Phoenix.TemplateTest do
     end
 
     assert OtherViews.render("foo") == "Not found: foo"
+  end
+
+  test "template_not_found detects and short circuits infinite call-stacks" do
+    defmodule InfiniteView do
+      use Phoenix.Template, root: Path.join(__DIR__, "not-exists")
+
+      def template_not_found(_template, assigns) do
+        render "this-does-not-exist.html", assigns
+      end
+    end
+
+    assert_raise Phoenix.Template.UndefinedError, ~r/Could not render "this-does-not-exist.html".*/, fn ->
+      InfiniteView.render("this-does-not-exist.html")
+    end
   end
 
   test "generates __phoenix_recompile__? function" do

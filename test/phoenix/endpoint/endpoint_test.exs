@@ -1,8 +1,10 @@
+System.put_env("ENDPOINT_TEST_HOST", "example.com")
+
 defmodule Phoenix.Endpoint.EndpointTest do
   use ExUnit.Case, async: true
   use RouterHelper
 
-  @config [url: [host: "example.com", path: "/api"],
+  @config [url: [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/api"],
            static_url: [host: "static.example.com"],
            server: false, http: [port: 80], https: [port: 443],
            force_ssl: [subdomains: true],
@@ -26,7 +28,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
   end
 
   test "has reloadable configuration" do
-    assert Endpoint.config(:url) == [host: "example.com", path: "/api"]
+    assert Endpoint.config(:url) == [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/api"]
     assert Endpoint.config(:static_url) == [host: "static.example.com"]
     assert Endpoint.url == "https://example.com"
     assert Endpoint.static_url == "https://static.example.com"
@@ -40,7 +42,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
 
     assert Endpoint.config_change([{Endpoint, config}], []) == :ok
     assert Enum.sort(Endpoint.config(:url)) ==
-           [host: "example.com", path: "/", port: 1234]
+           [host: {:system, "ENDPOINT_TEST_HOST"}, path: "/", port: 1234]
     assert Enum.sort(Endpoint.config(:static_url)) ==
            [host: "static.example.com", port: 456]
     assert Endpoint.url == "https://example.com:1234"
@@ -72,9 +74,13 @@ defmodule Phoenix.Endpoint.EndpointTest do
     assert Endpoint.static_path("/foo.css") == "/foo-abcdef.css?vsn=d"
 
     # Trigger a config change and the cache should be warmed up again
-    assert Endpoint.config_change([{Endpoint, @config}], []) == :ok
+    config =
+      @config
+      |> put_in([:cache_static_manifest], "../../../../test/fixtures/manifest_upgrade.json")
 
-    assert Endpoint.static_path("/foo.css") == "/foo-abcdef.css?vsn=d"
+    assert Endpoint.config_change([{Endpoint, config}], []) == :ok
+
+    assert Endpoint.static_path("/foo.css") == "/foo-ghijkl.css?vsn=d"
   end
 
   test "uses url configuration for static path" do
@@ -96,7 +102,7 @@ defmodule Phoenix.Endpoint.EndpointTest do
   end
 
   test "injects pubsub broadcast with configured server" do
-    Endpoint.subscribe(self, "sometopic")
+    Endpoint.subscribe("sometopic")
     some = spawn fn -> :ok end
 
     Endpoint.broadcast_from(some, "sometopic", "event1", %{key: :val})

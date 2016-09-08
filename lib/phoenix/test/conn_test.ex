@@ -14,21 +14,21 @@ defmodule Phoenix.ConnTest do
   the preferred way to test anything that your router dispatches
   to.
 
-      conn = get conn(), "/"
+      conn = get build_conn(), "/"
       assert conn.resp_body =~ "Welcome!"
 
-      conn = post conn(), "/login", [username: "john", password: "doe"]
+      conn = post build_conn(), "/login", [username: "john", password: "doe"]
       assert conn.resp_body =~ "Logged in!"
 
   As in your application, the connection is also the main abstraction
-  in testing. `conn()` returns a new connection and functions in this
+  in testing. `build_conn()` returns a new connection and functions in this
   module can be used to manipulate the connection before dispatching
   to the endpoint.
 
   For example, one could set the accepts header for json requests as
   follows:
 
-      conn()
+      build_conn()
       |> put_req_header("accept", "application/json")
       |> get("/")
 
@@ -46,7 +46,7 @@ defmodule Phoenix.ConnTest do
   For such cases, just pass an atom representing the action
   to dispatch:
 
-      conn = get conn(), :index
+      conn = get build_conn(), :index
       assert conn.resp_body =~ "Welcome!"
 
   ## Views testing
@@ -74,19 +74,21 @@ defmodule Phoenix.ConnTest do
   work.
 
   Keep in mind Phoenix will automatically recycle the connection
-  between dispatches. This usually works out well most times but
+  between dispatches. This usually works out well most times, but
   it may discard information if you are modifying the connection
   before the next dispatch:
 
       # No recycling as the connection is fresh
-      conn = get conn(), "/"
+      conn = get build_conn(), "/"
 
       # The connection is recycled, creating a new one behind the scenes
       conn = post conn, "/login"
 
       # We can also recycle manually in case we want custom headers
-      conn = recycle(conn)
-      conn = put_req_header("x-special", "nice")
+      conn =
+        conn
+        |> recycle()
+        |> put_req_header("x-special", "nice")
 
       # No recycling as we did it explicitly
       conn = delete conn, "/logout"
@@ -108,9 +110,21 @@ defmodule Phoenix.ConnTest do
   @doc """
   Creates a connection to be used in upcoming requests.
   """
+  @spec build_conn() :: Conn.t
+  def build_conn() do
+    build_conn(:get, "/", nil)
+  end
+
+  @doc """
+  Deprecated version of conn/0. Use build_conn/0 instead
+  """
   @spec conn() :: Conn.t
   def conn() do
-    conn(:get, "/", nil)
+    IO.write :stderr, """
+    warning: using conn/0 to build a connection is deprecated. Use build_conn/0 instead.
+    #{Exception.format_stacktrace}
+    """
+    build_conn()
   end
 
   @doc """
@@ -120,11 +134,23 @@ defmodule Phoenix.ConnTest do
   This is useful when a specific connection is required
   for testing a plug or a particular function.
   """
-  @spec conn() :: Conn.t
-  def conn(method, path, params_or_body \\ nil) do
+  @spec build_conn(atom | binary, binary, binary | list | map) :: Conn.t
+  def build_conn(method, path, params_or_body \\ nil) do
     Plug.Adapters.Test.Conn.conn(%Conn{}, method, path, params_or_body)
     |> Conn.put_private(:plug_skip_csrf_protection, true)
     |> Conn.put_private(:phoenix_recycled, true)
+  end
+
+  @doc """
+  Deprecated version of conn/3. Use build_conn/3 instead
+  """
+  @spec conn(atom | binary, binary, binary | list | map) :: Conn.t
+  def conn(method, path, params_or_body \\ nil) do
+    IO.write :stderr, """
+    warning: using conn/3 to build a connection is deprecated. Use build_conn/3 instead.
+    #{Exception.format_stacktrace}
+    """
+    build_conn(method, path, params_or_body)
   end
 
   @http_methods [:get, :post, :put, :patch, :delete, :options, :connect, :trace, :head]
@@ -164,8 +190,8 @@ defmodule Phoenix.ConnTest do
   This function, as well as `get/3`, `post/3` and friends, accepts the
   request body or parameters as last argument:
 
-        get conn(), "/", some: "param"
-        get conn(), "/", "some=param&url=encoded"
+        get build_conn(), "/", some: "param"
+        get build_conn(), "/", "some=param&url=encoded"
 
   The allowed values are:
 
@@ -178,8 +204,12 @@ defmodule Phoenix.ConnTest do
       set the content-type to multipart. The map or list may contain
       other lists or maps and all entries will be normalized to string
       keys
+
+    * a struct - unlike other maps, a struct will be passed through as-is
+      without normalizing its entries
   """
-  def dispatch(conn, endpoint, method, path_or_action, params_or_body \\ nil) do
+  def dispatch(conn, endpoint, method, path_or_action, params_or_body \\ nil)
+  def dispatch(%Plug.Conn{} = conn, endpoint, method, path_or_action, params_or_body) do
     if is_nil(endpoint) do
       raise "no @endpoint set in test case"
     end
@@ -194,6 +224,10 @@ defmodule Phoenix.ConnTest do
     |> dispatch_endpoint(endpoint, method, path_or_action, params_or_body)
     |> Conn.put_private(:phoenix_recycled, false)
     |> from_set_to_sent()
+  end
+  def dispatch(conn, _endpoint, method, _path_or_action, _params_or_body) do
+    raise ArgumentError, "expected first argument to #{method} to be a " <>
+                         "%Plug.Conn{}, got #{inspect conn}"
   end
 
   defp dispatch_endpoint(conn, endpoint, method, path, params_or_body) when is_binary(path) do
@@ -282,7 +316,7 @@ defmodule Phoenix.ConnTest do
     case parse_content_type(header) do
       {part, subpart} ->
         format = Atom.to_string(format)
-        format in Plug.MIME.extensions(part <> "/" <> subpart) or
+        format in MIME.extensions(part <> "/" <> subpart) or
           format == subpart or String.ends_with?(subpart, "+" <> format)
       _  ->
         false
@@ -304,7 +338,7 @@ defmodule Phoenix.ConnTest do
 
   ## Examples
 
-      conn = get conn(), "/"
+      conn = get build_conn(), "/"
       assert response(conn, 200) =~ "hello world"
 
   """
@@ -325,7 +359,7 @@ defmodule Phoenix.ConnTest do
     if given == status do
       body
     else
-      raise "expected response with status #{given}, got: #{status}"
+      raise "expected response with status #{given}, got: #{status}, with body:\n#{body}"
     end
   end
 
@@ -412,7 +446,7 @@ defmodule Phoenix.ConnTest do
   @doc """
   Recycles the connection.
 
-  Recycling receives an connection and returns a new connection,
+  Recycling receives a connection and returns a new connection,
   containing cookies and relevant information from the given one.
 
   This emulates behaviour performed by browsers where cookies
@@ -424,7 +458,7 @@ defmodule Phoenix.ConnTest do
   """
   @spec recycle(Conn.t) :: Conn.t
   def recycle(conn) do
-    conn()
+    build_conn()
     |> Plug.Test.recycle_cookies(conn)
     |> copy_headers(conn.req_headers, ~w(accept))
   end
@@ -439,7 +473,7 @@ defmodule Phoenix.ConnTest do
 
   See `recycle/1` for more information.
   """
-  @spec recycle(Conn.t) :: Conn.t
+  @spec ensure_recycled(Conn.t) :: Conn.t
   def ensure_recycled(conn) do
     if conn.private[:phoenix_recycled] do
       conn
@@ -479,19 +513,24 @@ defmodule Phoenix.ConnTest do
 
   Or only invoke the Endpoint's plugs:
 
-    conn =
-      conn
-      |> bypass_through()
-      |> get("/")
-      |> MyApp.RequireAuthentication.call([])
-    assert conn.halted
+      conn =
+        conn
+        |> bypass_through()
+        |> get("/")
+        |> MyApp.RequireAuthentication.call([])
+      assert conn.halted
   """
   @spec bypass_through(Conn.t) :: Conn.t
   def bypass_through(conn) do
     Plug.Conn.put_private(conn, :phoenix_bypass, :all)
   end
 
-  @spec bypass_through(Conn.t, Module.t, :atom | List.t) :: Conn.t
+  @doc """
+  Calls the Endpoint and bypasses Router match.
+
+  See `bypass_through/1`.
+  """
+  @spec bypass_through(Conn.t, module, :atom | list) :: Conn.t
   def bypass_through(conn, router, pipelines \\ []) do
     Plug.Conn.put_private(conn, :phoenix_bypass, {router, List.wrap(pipelines)})
   end
@@ -513,15 +552,15 @@ defmodule Phoenix.ConnTest do
   ## Examples
 
       assert_error_sent :not_found, fn ->
-        get conn(), "/users/not-found"
+        get build_conn(), "/users/not-found"
       end
 
       response = assert_error_sent 404, fn ->
-        get conn(), "/users/not-found"
+        get build_conn(), "/users/not-found"
       end
       assert {404, [_h | _t], "Page not found"} = response
   """
-  @spec assert_error_sent(Integer.t | atom, function) :: {Integer.t, List.t, term}
+  @spec assert_error_sent(integer | atom, function) :: {integer, list, term}
   def assert_error_sent(status_int_or_atom, func) do
     expected_status = Plug.Conn.Status.code(status_int_or_atom)
     discard_previously_sent()

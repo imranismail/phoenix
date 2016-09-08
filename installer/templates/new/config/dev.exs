@@ -11,7 +11,9 @@ config :<%= application_name %>, <%= application_module %>.Endpoint,
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
-  watchers: <%= if brunch do %>[node: ["node_modules/brunch/bin/brunch", "watch", "--stdin"]]<% else %>[]<% end %>
+  watchers: <%= if brunch do %>[node: ["node_modules/brunch/bin/brunch", "watch", "--stdin",
+                    cd: Path.expand("../", __DIR__)]]<% else %>[]<% end %>
+
 
 <%= if html do %># Watch static and templates for browser reloading.
 config :<%= application_name %>, <%= application_module %>.Endpoint,
@@ -27,7 +29,6 @@ config :<%= application_name %>, <%= application_module %>.Endpoint,
 <% end %># Do not include metadata nor timestamps in development logs
 config :logger, :console, format: "[$level] $message\n"
 
-# Set a higher stacktrace during development.
-# Do not configure such in production as keeping
-# and calculating stacktraces is usually expensive.
+# Set a higher stacktrace during development. Avoid configuring such
+# in production as building large stacktraces may be expensive.
 config :phoenix, :stacktrace_depth, 20

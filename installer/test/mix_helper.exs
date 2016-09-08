@@ -10,7 +10,7 @@ defmodule MixHelper do
   end
 
   def in_tmp(which, function) do
-    path = Path.join(tmp_path, which)
+    path = Path.join(tmp_path(), which)
     File.rm_rf! path
     File.mkdir_p! path
     File.cd! path, function
@@ -33,6 +33,16 @@ defmodule MixHelper do
       is_function(match, 1) ->
         assert_file(file)
         match.(File.read!(file))
+    end
+  end
+
+  def with_generator_env(new_env, fun) do
+    old = Application.get_env(:phoenix, :generators)
+    Application.put_env(:phoenix, :generators, new_env)
+    try do
+      fun.()
+    after
+      Application.put_env(:phoenix, :generators, old)
     end
   end
 end

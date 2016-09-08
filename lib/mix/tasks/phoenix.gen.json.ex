@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
 
   The generated resource will contain:
 
-    * a model in web/models
+    * a schema in web/models
     * a view in web/views
     * a controller in web/controllers
     * a migration file for the repository
@@ -37,7 +37,7 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
     path    = binding[:path]
     route   = String.split(path, "/") |> Enum.drop(-1) |> Kernel.++([plural]) |> Enum.join("/")
     binding = binding ++ [plural: plural, route: route,
-                          binary_id: opts[:binary_id],
+                          sample_id: sample_id(opts),
                           attrs: attrs, params: Mix.Phoenix.params(attrs)]
 
     Mix.Phoenix.check_module_name_availability!(binding[:module] <> "Controller")
@@ -47,11 +47,7 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
       {:eex, "controller.ex",       "web/controllers/#{path}_controller.ex"},
       {:eex, "view.ex",             "web/views/#{path}_view.ex"},
       {:eex, "controller_test.exs", "test/controllers/#{path}_controller_test.exs"},
-    ]
-
-    unless File.exists?("web/views/changeset_view.ex") do
-      files = files ++ [{:eex, "changeset_view.ex", "web/views/changeset_view.ex"}]
-    end
+    ] ++ changeset_view()
 
     Mix.Phoenix.copy_from paths(), "priv/templates/phoenix.gen.json", "", binding, files
 
@@ -69,21 +65,38 @@ defmodule Mix.Tasks.Phoenix.Gen.Json do
     end
   end
 
+  defp sample_id(opts) do
+    if Keyword.get(opts, :binary_id, false) do
+      Keyword.get(opts, :sample_binary_id, "11111111-1111-1111-1111-111111111111")
+    else
+      -1
+    end
+  end
+
+  defp changeset_view do
+    if File.exists?("web/views/changeset_view.ex") do
+      []
+    else
+      [{:eex, "changeset_view.ex", "web/views/changeset_view.ex"}]
+    end
+  end
+
   defp validate_args!([_, plural | _] = args) do
     cond do
       String.contains?(plural, ":") ->
-        raise_with_help
+        raise_with_help()
       plural != Phoenix.Naming.underscore(plural) ->
-        Mix.raise "expected the second argument, #{inspect plural}, to be all lowercase using snake_case convention"
+        Mix.raise "Expected the second argument, #{inspect plural}, to be all lowercase using snake_case convention"
       true ->
         args
     end
   end
 
   defp validate_args!(_) do
-    raise_with_help
+    raise_with_help()
   end
 
+  @spec raise_with_help() :: no_return()
   defp raise_with_help do
     Mix.raise """
     mix phoenix.gen.json expects both singular and plural names

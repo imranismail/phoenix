@@ -5,8 +5,8 @@ defmodule Phoenix.Socket do
   `Phoenix.Socket` is used as a module for establishing and maintaining
   the socket state via the `Phoenix.Socket` struct.
 
-  Once connected to a socket, incoming  and pubsub events are routed
-  to channels. The incoming client data is routed to channels via transports.
+  Once connected to a socket, incoming and outgoing events are routed to
+  channels. The incoming client data is routed to channels via transports.
   It is the responsibility of the socket to tie transports and channels
   together.
 
@@ -15,13 +15,13 @@ defmodule Phoenix.Socket do
 
       transport :websocket, Phoenix.Transports.WebSocket
 
-  The command above means incoming socket connections can be done via
+  The command above means incoming socket connections can be made via
   the WebSocket transport. Events are routed by topic to channels:
 
-      channel "rooms:lobby", MyApp.LobbyChannel
+      channel "room:lobby", MyApp.LobbyChannel
 
   See `Phoenix.Channel` for more information on channels. Check each
-  transport module to check the options specific to each transport.
+  transport module to find the options specific to each transport.
 
   ## Socket Behaviour
 
@@ -40,7 +40,7 @@ defmodule Phoenix.Socket do
         use Phoenix.Socket
 
         transport :websocket, Phoenix.Transports.WebSocket
-        channel "rooms:*", MyApp.RoomChannel
+        channel "room:*", MyApp.RoomChannel
 
         def connect(params, socket) do
           {:ok, assign(socket, :user_id, params["user_id"])}
@@ -63,7 +63,7 @@ defmodule Phoenix.Socket do
     * `joined` - If the socket has effectively joined the channel
     * `pubsub_server` - The registered name of the socket's pubsub server
     * `ref` - The latest ref sent by the client
-    * `topic` - The string topic, for example `"rooms:123"`
+    * `topic` - The string topic, for example `"room:123"`
     * `transport` - The socket's transport, for example: `Phoenix.Transports.WebSocket`
     * `transport_pid` - The pid of the socket's transport process
     * `transport_name` - The socket's transport, for example: `:websocket`
@@ -76,9 +76,7 @@ defmodule Phoenix.Socket do
   writing your own transports.
   """
 
-  use Behaviour
   alias Phoenix.Socket
-
 
   @doc """
   Receives the socket params and authenticates the connection.
@@ -97,12 +95,12 @@ defmodule Phoenix.Socket do
   See `Phoenix.Token` documentation for examples in
   performing token verification on connect.
   """
-  defcallback connect(params :: map, Socket.t) :: {:ok, Socket.t} | :error
+  @callback connect(params :: map, Socket.t) :: {:ok, Socket.t} | :error
 
   @doc ~S"""
   Identifies the socket connection.
 
-  Socket id's are topics that allow you to identify all sockets for a given user:
+  Socket IDs are topics that allow you to identify all sockets for a given user:
 
       def id(socket), do: "users_socket:#{socket.assigns.user_id}"
 
@@ -113,7 +111,7 @@ defmodule Phoenix.Socket do
 
   Returning `nil` makes this socket anonymous.
   """
-  defcallback id(Socket.t) :: String.t | nil
+  @callback id(Socket.t) :: String.t | nil
 
   defmodule InvalidMessageError do
     @moduledoc """
@@ -224,13 +222,13 @@ defmodule Phoenix.Socket do
 
   """
   def assign(socket = %Socket{}, key, value) do
-    update_in socket.assigns, &Map.put(&1, key, value)
+    put_in socket.assigns[key], value
   end
 
   @doc """
   Defines a channel matching the given topic and transports.
 
-    * `topic_pattern` - The string pattern, for example "rooms:*", "users:*", "system"
+    * `topic_pattern` - The string pattern, for example "room:*", "users:*", "system"
     * `module` - The channel module handler, for example `MyApp.RoomChannel`
     * `opts` - The optional list of options, see below
 

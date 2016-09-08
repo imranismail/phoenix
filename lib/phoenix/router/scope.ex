@@ -12,13 +12,14 @@ defmodule Phoenix.Router.Scope do
   """
   def init(module) do
     Module.put_attribute(module, @stack, [%Scope{}])
-    Module.put_attribute(module, @pipes, HashSet.new)
+    Module.put_attribute(module, @pipes, MapSet.new)
   end
 
   @doc """
   Builds a route based on the top of the stack.
   """
   def route(module, kind, verb, path, plug, plug_opts, opts) do
+    path    = validate_path(path)
     private = Keyword.get(opts, :private, %{})
     assigns = Keyword.get(opts, :assigns, %{})
     as      = Keyword.get(opts, :as, Phoenix.Naming.resource_name(plug, "Controller"))
@@ -29,10 +30,27 @@ defmodule Phoenix.Router.Scope do
   end
 
   @doc """
+  Validates a path is a string and contains a leading prefix.
+  """
+
+  def validate_path("/" <> _ = path), do: path
+  def validate_path(path) when is_binary(path) do
+    IO.write :stderr, """
+    warning: router paths should begin with a forward slash, got: #{inspect path}
+    #{Exception.format_stacktrace}
+    """
+
+    "/" <> path
+  end
+  def validate_path(path) do
+    raise ArgumentError, "router paths must be strings, got: #{inspect path}"
+  end
+
+  @doc """
   Defines the given pipeline.
   """
   def pipeline(module, pipe) when is_atom(pipe) do
-    update_pipes module, &HashSet.put(&1, pipe)
+    update_pipes module, &MapSet.put(&1, pipe)
   end
 
   @doc """
@@ -55,11 +73,12 @@ defmodule Phoenix.Router.Scope do
   end
 
   def push(module, opts) when is_list(opts) do
-    path  = Keyword.get(opts, :path)
-    if path, do: path = Plug.Router.Utils.split(path)
+    path = with path when not is_nil(path) <- Keyword.get(opts, :path),
+                path <- validate_path(path),
+                do: Plug.Router.Utils.split(path)
 
     alias = Keyword.get(opts, :alias)
-    if alias, do: alias = Atom.to_string(alias)
+    alias = alias && Atom.to_string(alias)
 
     scope = %Scope{path: path,
                    alias: alias,

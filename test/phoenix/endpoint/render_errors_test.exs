@@ -4,8 +4,16 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
 
   view = __MODULE__
 
+  def render("app.html", %{view_template: view_template} = assigns) do
+    "Layout: " <> render(view_template, assigns)
+  end
+
   def render("404.html", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
     "Got 404 from #{kind} with #{conn.method}"
+  end
+
+  def render("404.json", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
+    %{error: "Got 404 from #{kind} with #{conn.method}"}
   end
 
   def render("415.html", %{kind: kind, reason: _reason, stack: _stack, conn: conn}) do
@@ -22,7 +30,7 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
 
   defmodule Router do
     use Plug.Router
-    use Phoenix.Endpoint.RenderErrors, view: view, accepts: ~w(html)
+    use Phoenix.Endpoint.RenderErrors, view: view, accepts: ~w(html json)
 
     plug :match
     plug :dispatch
@@ -64,11 +72,26 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
     assert_received {:plug_conn, :sent}
   end
 
-  test "call/2 is overridden with no route match" do
+  test "call/2 is overridden with no route match as HTML" do
     conn = call(Router, :get, "/unknown")
     assert conn.state == :sent
     assert conn.status == 404
     assert conn.resp_body == "Got 404 from error with GET"
+    assert_received {:plug_conn, :sent}
+  end
+
+  test "call/2 is overridden with no route match as JSON" do
+    conn = call(Router, :get, "/unknown?_format=json")
+    assert conn.state == :sent
+    assert conn.status == 404
+    assert conn.resp_body |> Poison.decode!() == %{"error" => "Got 404 from error with GET"}
+    assert_received {:plug_conn, :sent}
+  end
+
+  test "call/2 is overridden with no route match while malformed format" do
+    conn = call(Router, :get, "/unknown?_format=unknown")
+    assert conn.state == :sent
+    assert conn.status == 404
     assert_received {:plug_conn, :sent}
   end
 
@@ -133,7 +156,7 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
   end
 
   test "exception page with params _format" do
-    conn = render(conn(:get, "/", [_format: "text"]), [], fn ->
+    conn = render(conn(:get, "/", [_format: "text"]), [accepts: ["text", "html"]], fn ->
       throw :hello
     end)
 
@@ -150,13 +173,23 @@ defmodule Phoenix.Endpoint.RenderErrorsTest do
     assert conn.resp_body == "500 in TEXT"
   end
 
+  test "exception page with layout" do
+    conn =
+      conn(:get, "/")
+      |> render([layout: {__MODULE__, :app}], fn -> throw :hello end)
+
+    assert conn.status == 500
+    assert conn.resp_body == "Layout: Got 500 from throw with GET"
+  end
+
+  @tag :capture_log
   test "exception page with invalid format" do
     conn =
       conn(:get, "/")
       |> put_req_header("accept", "unknown/unknown")
       |> render([], fn -> throw :hello end)
 
-    assert conn.status == 406
-    assert conn.resp_body == ""
+    assert conn.status == 500
+    assert conn.resp_body == "Got 500 from throw with GET"
   end
 end

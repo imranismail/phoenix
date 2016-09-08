@@ -1,5 +1,5 @@
 defmodule Phoenix.Channel do
-  @moduledoc """
+  @moduledoc ~S"""
   Defines a Phoenix Channel.
 
   Channels provide a means for bidirectional communication from clients that
@@ -7,25 +7,25 @@ defmodule Phoenix.Channel do
 
   ## Topics & Callbacks
 
-  Everytime you join a channel, you need to choose which particular topic you
+  Every time you join a channel, you need to choose which particular topic you
   want to listen to. The topic is just an identifier, but by convention it is
   often made of two parts: `"topic:subtopic"`. Using the `"topic:subtopic"`
   approach pairs nicely with the `Phoenix.Socket.channel/2` allowing you to
   match on all topics starting with a given prefix:
 
-      channel "rooms:*", MyApp.RoomChannel
+      channel "room:*", MyApp.RoomChannel
 
-  Any topic coming into the router with the `"rooms:"` prefix would dispatch
+  Any topic coming into the router with the `"room:"` prefix would dispatch
   to `MyApp.RoomChannel` in the above example. Topics can also be pattern
   matched in your channels' `join/3` callback to pluck out the scoped pattern:
 
       # handles the special `"lobby"` subtopic
-      def join("rooms:lobby", _auth_message, socket) do
+      def join("room:lobby", _auth_message, socket) do
         {:ok, socket}
       end
 
-      # handles any other subtopic as the room ID, for example `"rooms:12"`, `"rooms:34"`
-      def join("rooms:" <> room_id, auth_message, socket) do
+      # handles any other subtopic as the room ID, for example `"room:12"`, `"room:34"`
+      def join("room:" <> room_id, auth_message, socket) do
         {:ok, socket}
       end
 
@@ -80,7 +80,8 @@ defmodule Phoenix.Channel do
           Repo.insert!(changeset)
           {:reply, {:ok, changeset}, socket}
         else
-          {:reply, {:error, changeset.errors}, socket}
+          {:reply,{:error, MyApp.ChangesetView.render("errors.json",
+            %{changeset: changeset}), socket}
         end
       end
 
@@ -137,7 +138,7 @@ defmodule Phoenix.Channel do
       def handle_in("new_msg", %{"uid" => uid, "body" => body}, socket) do
         ...
         broadcast_from! socket, "new_msg", %{uid: uid, body: body}
-        MyApp.Endpoint.broadcast_from! self(), "rooms:superadmin",
+        MyApp.Endpoint.broadcast_from! self(), "room:superadmin",
           "new_msg", %{uid: uid, body: body}
         {:noreply, socket}
       end
@@ -145,8 +146,8 @@ defmodule Phoenix.Channel do
       # within controller
       def create(conn, params) do
         ...
-        MyApp.Endpoint.broadcast! "rooms:" <> rid, "new_msg", %{uid: uid, body: body}
-        MyApp.Endpoint.broadcast! "rooms:superadmin", "new_msg", %{uid: uid, body: body}
+        MyApp.Endpoint.broadcast! "room:" <> rid, "new_msg", %{uid: uid, body: body}
+        MyApp.Endpoint.broadcast! "room:superadmin", "new_msg", %{uid: uid, body: body}
         redirect conn, to: "/"
       end
 
@@ -169,40 +170,114 @@ defmodule Phoenix.Channel do
   process and do the clean up from another process.  Similar to GenServer,
   it would also be possible `:trap_exit` to guarantee that `terminate/2`
   is invoked. This practice is not encouraged though.
-  """
 
-  use Behaviour
+  ## Exit reasons when stopping a channel
+
+  When the channel callbacks return a `:stop` tuple, such as:
+
+      {:stop, :shutdown, socket}
+      {:stop, {:error, :enoent}, socket}
+
+  the second argument is the exit reason, which follows the same behaviour as
+  standard `GenServer` exits.
+
+  You have three options to choose from when shutting down a channel:
+
+    * `:normal` - in such cases, the exit won't be logged, there is no restart
+      in transient mode, and linked processes do not exit
+
+    * `:shutdown` or `{:shutdown, term}` - in such cases, the exit won't be
+      logged, there is no restart in transient mode, and linked processes exit
+      with the same reason unless they're trapping exits
+
+    * any other term - in such cases, the exit will be logged, there are
+      restarts in transient mode, and linked processes exit with the same reason
+      unless they're trapping exits
+
+
+  ## Subscribing to external topics
+
+  Sometimes you may need to programmatically subscribe a socket to external
+  topics in addition to the the internal `socket.topic`. For example,
+  imagine you have a bidding system where a remote client dynamically sets
+  preferences on products they want to receive bidding notifications on.
+  Instead of requiring a unique channel process and topic per
+  preference, a more efficient and simple approach would be to subscribe a
+  single channel to relevant notifications via your endpoint. For example:
+
+      defmodule MyApp.Endpoint.NotificationChannel do
+        use Phoenix.Channel
+
+        def join("notification:" <> user_id, %{"ids" => ids}, socket) do
+          topics = for product_id <- ids, do: "product:#{product_id}"
+
+          {:ok, socket
+                |> assign(:topics, [])
+                |> put_new_topics(topics)}
+        end
+
+        def handle_in("watch", %{"product_id" => id}, socket) do
+          {:reply, :ok, put_new_topics(socket, ["product:#{id}"])}
+        end
+
+        def handle_in("unwatch", %{"product_id" => id}, socket) do
+          {:reply, :ok, MyApp.Endpoint.unsubscribe("product:#{id}")}
+        end
+
+        defp put_new_topics(socket, topics) do
+          Enum.reduce(topics, socket, fn topic, acc ->
+            topics = acc.assigns.topics
+            if topic in topics do
+              acc
+            else
+              :ok = MyApp.Endpoint.subscribe(topic)
+              assign(acc, :topics, [topic | topics])
+            end
+          end)
+        end
+      end
+
+  Note: the caller must be responsible for preventing duplicate subscriptions.
+  After calling `subscribe/1` from your endpoint, the same flow applies to
+  handling regular Elixir messages within your channel. Most often, you'll
+  simply relay the `%Phoenix.Socket.Broadcast{}` event and payload:
+
+      alias Phoenix.Socket.Broadcast
+      def handle_info(%Broadcast{topic: _, event: ev, payload: payload}, socket) do
+        push socket, ev, payload
+        {:noreply, socket}
+      end
+  """
   alias Phoenix.Socket
   alias Phoenix.Channel.Server
 
   @type reply :: status :: atom | {status :: atom, response :: map}
-  @type socket_ref :: {transport_pid :: Pid, serializer :: Module.t,
+  @type socket_ref :: {transport_pid :: Pid, serializer :: module,
                        topic :: binary, ref :: binary}
 
 
-  defcallback code_change(old_vsn, Socket.t, extra :: term) ::
+  @callback code_change(old_vsn, Socket.t, extra :: term) ::
               {:ok, Socket.t} |
               {:error, reason :: term} when old_vsn: term | {:down, term}
 
-  defcallback join(topic :: binary, auth_msg :: map, Socket.t) ::
+  @callback join(topic :: binary, auth_msg :: map, Socket.t) ::
               {:ok, Socket.t} |
               {:ok, map, Socket.t} |
               {:error, map}
 
-  defcallback handle_in(event :: String.t, msg :: map, Socket.t) ::
+  @callback handle_in(event :: String.t, msg :: map, Socket.t) ::
               {:noreply, Socket.t} |
               {:reply, reply, Socket.t} |
               {:stop, reason :: term, Socket.t} |
               {:stop, reason :: term, reply, Socket.t}
 
-  defcallback handle_info(term, Socket.t) ::
+  @callback handle_info(term, Socket.t) ::
               {:noreply, Socket.t} |
               {:stop, reason :: term, Socket.t}
 
-  defcallback terminate(msg :: map, Socket.t) ::
+  @callback terminate(msg :: map, Socket.t) ::
               {:shutdown, :left | :closed} |
               term
-
 
   defmacro __using__(_) do
     quote do
@@ -299,7 +374,7 @@ defmodule Phoenix.Channel do
   end
 
   @doc """
-  Same as `broadcast/3` but raises if broadcast fails.
+  Same as `broadcast/3`, but raises if broadcast fails.
   """
   def broadcast!(socket, event, message) do
     %{pubsub_server: pubsub_server, topic: topic} = assert_joined!(socket)
@@ -324,7 +399,7 @@ defmodule Phoenix.Channel do
   end
 
   @doc """
-  Same as `broadcast_from/3` but raises if broadcast fails.
+  Same as `broadcast_from/3`, but raises if broadcast fails.
   """
   def broadcast_from!(socket, event, message) do
     %{pubsub_server: pubsub_server, topic: topic, channel_pid: channel_pid} = assert_joined!(socket)
@@ -352,7 +427,7 @@ defmodule Phoenix.Channel do
 
   Useful when you need to reply to a push that can't otherwise be handled using
   the `{:reply, {status, payload}, socket}` return from your `handle_in`
-  callbacks. `reply/3` will be used in the rare cases you need to perform work in
+  callbacks. `reply/2` will be used in the rare cases you need to perform work in
   another process and reply when finished by generating a reference to the push
   with `socket_ref/1`.
 
